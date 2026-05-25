@@ -125,7 +125,7 @@
       <div style="display:flex; gap:8px; align-items:flex-end;">
         <div class="dol-input-group" style="flex:1;">
           <label>Bài test</label>
-          <select id="level" onchange="window.updateTotalDisplay()">
+          <select id="level" onchange="updateTestNumberDropdown(); window.updateTotalDisplay()">
             <option value="Starters">Starters</option>
             <option value="Movers">Movers</option>
             <option value="Flyers">Flyers</option>
@@ -135,10 +135,8 @@
           <label>Số test</label>
           <select id="testNumber" onchange="window.updateTotalDisplay()">
             <option value="1">Test 1</option>
-            <option value="2">Test 2</option>
-            <option value="3">Test 3</option>
-            <option value="4">Test 4</option>
           </select>
+          <div id="ans-key-status" style="font-size:9px;color:#718096;margin-top:2px;font-weight:600;"></div>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center;">
           <label class="btn-sheets-pro">
@@ -287,6 +285,7 @@
 const GOOGLE_CLIENT_ID = '311524649262-mnm0i94ni311s5ustg3sgs8o9bcb1v34.apps.googleusercontent.com';
 const GOOGLE_API_KEY   = 'AIzaSyBT3hQPdHOryBgRZKKIlkdH3HtWLaAvzZs';
 const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+const ANS_FOLDER_ID    = '1uCG0zGp8m3dGprxvB3VqAySz_ClOtfYC';
 
 // ============================================================
 // STATE
@@ -300,6 +299,8 @@ var loadedFiles = { RW: [], LI: [] };
 var gapiReady = false;
 var tokenClient = null;
 var accessToken = null;
+// ansKeyIndex: { starters: { 1: 'fileId', 2: 'fileId' }, movers: {...}, flyers: {...} }
+var ansKeyIndex = { starters: {}, movers: {}, flyers: {} };
 
 // ============================================================
 // GOOGLE AUTH
@@ -335,6 +336,7 @@ window.onload = function () {
     gapi.load('client', async () => {
       await gapi.client.init({ apiKey: GOOGLE_API_KEY, discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
       gapiReady = true;
+      fetchAnswerKeyIndex(); // Tải kho đề tự động
     });
   });
 
@@ -536,14 +538,84 @@ function hideLoading() {
 }
 
 // ============================================================
-// ANSWER KEY (có test number)
+// ANSWER KEY INDEX — fetch từ Kho đề SMF (public folder, dùng API key)
+// ============================================================
+async function fetchAnswerKeyIndex() {
+  const statusEl = document.getElementById('ans-key-status');
+  if (statusEl) statusEl.innerText = '⏳ Đang tải danh sách đề...';
+  try {
+    const url = `https://www.googleapis.com/drive/v3/files?q='${ANS_FOLDER_ID}'+in+parents+and+trashed=false&fields=files(id,name)&orderBy=name&key=${GOOGLE_API_KEY}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (!data.files) throw new Error('Không lấy được danh sách file');
+
+    // Reset index
+    ansKeyIndex = { starters: {}, movers: {}, flyers: {} };
+
+    // Parse tên file: ans_starters_test1.png / ans_movers_test3.jpg
+    const pattern = /^ans_(starters|movers|flyers)_test(\d+)\.(png|jpg|jpeg)$/i;
+    data.files.forEach(f => {
+      const m = f.name.match(pattern);
+      if (m) {
+        const level = m[1].toLowerCase();
+        const num   = parseInt(m[2]);
+        ansKeyIndex[level][num] = f.id;
+      }
+    });
+
+    // Cập nhật dropdown Số test theo level hiện tại
+    updateTestNumberDropdown();
+    if (statusEl) statusEl.innerText = '';
+  } catch (e) {
+    console.warn('fetchAnswerKeyIndex error:', e);
+    if (statusEl) statusEl.innerText = '⚠️ Không tải được kho đề';
+  }
+}
+
+function updateTestNumberDropdown() {
+  const level = document.getElementById('level').value.toLowerCase();
+  const sel   = document.getElementById('testNumber');
+  const currentVal = sel.value;
+  const tests = Object.keys(ansKeyIndex[level] || {}).map(Number).sort((a,b) => a-b);
+
+  sel.innerHTML = '';
+  if (tests.length === 0) {
+    // Fallback: giữ ít nhất Test 1
+    sel.innerHTML = '<option value="1">Test 1</option>';
+  } else {
+    tests.forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n; opt.innerText = 'Test ' + n;
+      sel.appendChild(opt);
+    });
+    // Giữ lại giá trị cũ nếu còn tồn tại
+    if (tests.includes(parseInt(currentVal))) sel.value = currentVal;
+  }
+  updateAnswerKey(document.getElementById('level').value);
+}
+
+// ============================================================
+// ANSWER KEY — hiển thị ảnh từ Drive
 // ============================================================
 function updateAnswerKey(level) {
-  const img = document.getElementById('answer-key-img');
-  const lv = level.toLowerCase();
-  const testNum = document.getElementById('testNumber').value;
-  img.src = `ans_${lv}_test${testNum}.png`;
-  img.onerror = () => { img.alt = `Không tìm thấy ans_${lv}_test${testNum}.png`; };
+  const img   = document.getElementById('answer-key-img');
+  const lv    = level.toLowerCase();
+  const testNum = parseInt(document.getElementById('testNumber').value);
+  const fileId  = (ansKeyIndex[lv] || {})[testNum];
+
+  if (fileId) {
+    // Dùng thumbnail URL công khai, không cần auth
+    img.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`;
+    img.alt = '';
+    img.onerror = () => {
+      // Fallback sang uc export nếu thumbnail fail
+      img.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
+      img.onerror = () => { img.alt = `Không tải được ans_${lv}_test${testNum}`; img.src = ''; };
+    };
+  } else {
+    img.src = '';
+    img.alt = `Chưa có ans_${lv}_test${testNum} trong kho đề`;
+  }
 }
 
 // ============================================================
