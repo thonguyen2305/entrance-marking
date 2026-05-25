@@ -453,6 +453,7 @@ async function loadFromDrive(type) {
         pageSize: 100,
         includeItemsFromAllDrives: true,
         supportsAllDrives: true,
+        corpora: 'allDrives',
       };
       if (pageToken) params.pageToken = pageToken;
       const res = await gapi.client.drive.files.list(params);
