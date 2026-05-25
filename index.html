@@ -8,6 +8,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 
   <!-- Google APIs -->
@@ -31,7 +32,7 @@
     .skill-card { background: white; border: 1px solid #EDF2F7; border-radius: 16px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
     .rw-blue { border-left: 5px solid var(--blue); } .li-green { border-left: 5px solid var(--green); } .sp-yellow { border-left: 5px solid var(--yellow); }
     .skill-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-    .skill-name { font-weight: 700; font-size: 11px; color: #4A5568; white-space: nowrap; }
+    .skill-name { font-weight: 700; font-size: 11px; color: #4A5568; white-space: nowrap; display: flex; align-items: center; line-height: 1; }
     .btn-dol-action { padding: 5px 10px; border-radius: 8px; font-size: 10px; font-weight: 700; cursor: pointer; border: none; color: white; }
     .danger-light { background: #FFF5F5; border: 1px solid #FEB2B2; color: #C53030; }
     .blue-main { background: var(--blue); } .green-main { background: var(--green); }
@@ -197,8 +198,9 @@
     <!-- SKILL CARDS -->
     <div class="skill-card rw-blue">
       <div class="skill-head">
-        <span class="skill-name">📘 READING & WRITING</span>
+        <span class="skill-name" style="display:flex;align-items:center;gap:5px;">📘 READING & WRITING</span>
         <div class="skill-btns">
+          <button class="btn-dol-action blue-main" onclick="switchSkillView('RW')" id="btn-view-rw">📋 Preview</button>
           <button class="btn-dol-action danger-light" onclick="window.resetSkill('RW')">Chấm lại</button>
           <label class="btn-dol-action blue-main">📂 Local <input type="file" id="rwFolder" webkitdirectory directory multiple hidden></label>
         </div>
@@ -208,8 +210,9 @@
 
     <div class="skill-card li-green">
       <div class="skill-head">
-        <span class="skill-name">🎧 LISTENING</span>
+        <span class="skill-name" style="display:flex;align-items:center;gap:5px;">🎧 LISTENING</span>
         <div class="skill-btns">
+          <button class="btn-dol-action green-main" onclick="switchSkillView('LI')" id="btn-view-li">📋 Preview</button>
           <button class="btn-dol-action danger-light" onclick="window.resetSkill('LI')">Chấm lại</button>
           <label class="btn-dol-action green-main">📂 Local <input type="file" id="liFolder" webkitdirectory directory multiple hidden></label>
         </div>
@@ -555,37 +558,95 @@ async function loadAllImages(e, type) {
   renderSkillUI(type);
 }
 
+// Per-skill canvas containers stored in memory
+var skillContainers = { RW: null, LI: null };
+var activeViewType = '';
+
+function switchSkillView(type) {
+  if (activeViewType === type) return;
+  activeViewType = type;
+  const container = document.getElementById('canvas-list');
+  container.innerHTML = '';
+  if (skillContainers[type]) {
+    container.appendChild(skillContainers[type]);
+  }
+  // Re-highlight correct page box for the switched skill
+  if (loadedFiles[type] && loadedFiles[type].length > 0) {
+    highlightPageBox(loadedFiles[type][0].name);
+  }
+}
+
 async function renderSkillUI(type) {
   const files = loadedFiles[type];
   const list = document.getElementById(type === 'RW' ? 'rw-list' : 'li-list');
-  const container = document.getElementById('canvas-list');
-  list.innerHTML = ''; container.innerHTML = ''; canvases = {}; currentType = type;
+  list.innerHTML = '';
   pageScores[type] = {};
+
+  // Destroy old fabric canvases for this skill only
+  if (skillContainers[type]) {
+    const oldNames = Object.keys(canvases).filter(name =>
+      loadedFiles[type] && loadedFiles[type].some(f => f.name === name)
+    );
+    oldNames.forEach(name => {
+      try { canvases[name].dispose(); } catch(e) {}
+      delete canvases[name];
+    });
+  }
+
+  // Create new DOM container for this skill
+  const fragment = document.createElement('div');
+  fragment.id = 'skill-container-' + type;
+  skillContainers[type] = fragment;
+
+  // Switch view to this skill
+  activeViewType = type;
+  currentType = type;
+  const container = document.getElementById('canvas-list');
+  container.innerHTML = '';
+  container.appendChild(fragment);
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     pageScores[type][file.name] = 0;
     const safeName = file.name.replace(/\W/g, '_');
     const box = document.createElement('div');
-    box.className = 'page-box'; box.id = `box-${safeName}`;
-    box.innerHTML = `<span>P${i + 1}</span><input type="number" value="0">`;
-    box.onclick = () => { const el = document.getElementById(`view-${safeName}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+    box.className = 'page-box'; box.id = 'box-' + safeName;
+    box.innerHTML = '<span>P' + (i + 1) + '</span><input type="number" value="0">';
+    box.onclick = () => { const el = document.getElementById('view-' + safeName); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
     const inp = box.querySelector('input');
     inp.onchange = (ev) => { pageScores[type][file.name] = parseInt(ev.target.value) || 0; window.updateTotalDisplay(); };
     inp.onclick = (ev) => ev.stopPropagation();
     list.appendChild(box);
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'canvas-item-wrapper'; wrapper.id = `view-${safeName}`; wrapper.dataset.filename = file.name;
-    wrapper.innerHTML = `<div style="position:absolute;top:-12px;left:10px;background:var(--dol-red);color:white;padding:2px 10px;border-radius:4px;font-size:10px;font-weight:700;z-index:10">P${i + 1}</div><canvas id="canv-${i}"></canvas>`;
-    container.appendChild(wrapper);
-    await initCanvas(file, `canv-${i}`, file.name);
+    wrapper.className = 'canvas-item-wrapper';
+    wrapper.id = 'view-' + safeName;
+    wrapper.dataset.filename = file.name;
+    wrapper.innerHTML = '<div style="position:absolute;top:-12px;left:10px;background:var(--dol-red);color:white;padding:2px 10px;border-radius:4px;font-size:10px;font-weight:700;z-index:10">P' + (i + 1) + '</div><canvas id="canv-' + type + '-' + i + '"></canvas>';
+    fragment.appendChild(wrapper);
+    await initCanvas(file, 'canv-' + type + '-' + i, file.name);
   }
   if (files.length > 0) highlightPageBox(files[0].name);
 }
 
+async function convertToJpegIfNeeded(file) {
+  const name = file.name.toLowerCase();
+  const isHeic = name.endsWith('.heic') || name.endsWith('.heif') ||
+                 file.type === 'image/heic' || file.type === 'image/heif';
+  if (!isHeic) return file;
+  try {
+    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+    const outBlob = Array.isArray(converted) ? converted[0] : converted;
+    return new File([outBlob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+  } catch(e) {
+    console.warn('HEIC convert failed for', file.name, e);
+    return file; // fallback, will likely still fail to display
+  }
+}
+
 function initCanvas(file, canvasId, fileName) {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
+    const safeFile = await convertToJpegIfNeeded(file);
     const reader = new FileReader();
     reader.onload = (f) => {
       fabric.Image.fromURL(f.target.result, img => {
@@ -610,7 +671,7 @@ function initCanvas(file, canvasId, fileName) {
         canvases[fileName] = c; resolve();
       });
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(safeFile);
   });
 }
 
@@ -666,7 +727,7 @@ window.resetSkill = function (type) {
     }
   });
   const listId = type === 'RW' ? 'rw-list' : 'li-list';
-  document.querySelectorAll(`#${listId} input`).forEach(inp => inp.value = 0);
+  document.querySelectorAll('#' + listId + ' input').forEach(inp => inp.value = 0);
   window.updateTotalDisplay();
 };
 
