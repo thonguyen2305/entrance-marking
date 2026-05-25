@@ -451,6 +451,8 @@ async function loadFromDrive(type) {
         fields: 'nextPageToken, files(id, name, mimeType)',
         orderBy: 'name',
         pageSize: 100,
+        includeItemsFromAllDrives: true,
+        supportsAllDrives: true,
       };
       if (pageToken) params.pageToken = pageToken;
       const res = await gapi.client.drive.files.list(params);
